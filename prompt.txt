@@ -3,7 +3,8 @@ Each existing row has the format:
 timestamp,random_uuid,title
 
 Use the previous titles and timestamps as inspiration for the next entry so the narrative slowly evolves over time.
-When writing, feel free to reference notable historical events that happened on this month and day in past years.
+When writing, reference a historically significant event that occurred on {current_date} in some past year.
+Avoid repeating these events: {events_to_avoid}.
 The content should be fully fictional and may feature any characters or settings—not just AI.
 
 Each row should contain a single title wrapped in [START] and [END].

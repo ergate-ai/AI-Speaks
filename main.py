@@ -79,9 +79,19 @@ def update_prompt_file(new_prompt):
         print("Prompt file updated.")
 
 
-def generate_initial_csv_langchain(prompt_instructions: str) -> list:
+def generate_initial_csv_langchain(
+    prompt_instructions: str,
+    *,
+    current_date: str,
+    events_to_avoid: list[str],
+) -> list:
+    """Generate the first mind entry while avoiding previously used events."""
+    prompt_text = prompt_instructions.format(
+        current_date=current_date,
+        events_to_avoid=", ".join(events_to_avoid) if events_to_avoid else ""
+    )
     llm = MyOllamaLLM(model=MODEL_NAME)
-    prompt_template = PromptTemplate(input_variables=[], template=prompt_instructions)
+    prompt_template = PromptTemplate(input_variables=[], template=prompt_text)
     chain = LLMChain(llm=llm, prompt=prompt_template)
     response = chain.run({})
     print("Initial CSV response:", response)
@@ -102,7 +112,56 @@ def humanize(d):
         pass
 
 
-def extend_csv_langchain(existing_csv: list, prompt_instructions: str) -> list:
+def extract_event_date(title: str) -> str | None:
+    """Return a YYYY-MM-DD date string from the title if present."""
+    if not title:
+        return None
+    match = re.search(r"\b\d{4}-\d{2}-\d{2}\b", title)
+    if match:
+        return match.group(0)
+    match = re.search(r"\b\d{4}/\d{2}/\d{2}\b", title)
+    if match:
+        return match.group(0)
+    return None
+
+
+def extract_event_name(title: str) -> str | None:
+    """Return the event name preceding the date portion of the title."""
+    if not title:
+        return None
+    title = title.split(",", 1)[0].strip()
+    match = re.search(r"^(.*?)\s*-\s*\d{4}[/-]\d{2}[/-]\d{2}", title)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
+def collect_used_events(lines: list[str]) -> list[str]:
+    """Return a list of previously referenced historical event names."""
+    events: list[str] = []
+    for line in lines:
+        parts = line.split(",", 2)
+        if len(parts) < 3:
+            continue
+        title = parts[2].strip()
+        event = extract_event_name(title)
+        if event and event not in events:
+            events.append(event)
+    return events
+
+
+def extend_csv_langchain(
+    existing_csv: list,
+    prompt_instructions: str,
+    *,
+    current_date: str,
+    events_to_avoid: list[str],
+) -> list:
+    """Extend the mind while ensuring new events are unique."""
+    prompt_text = prompt_instructions.format(
+        current_date=current_date,
+        events_to_avoid=", ".join(events_to_avoid) if events_to_avoid else ""
+    )
     llm = MyOllamaLLM(model=MODEL_NAME)
     current_csv_str = "\n".join(existing_csv)
     prompt_template = PromptTemplate(
@@ -110,7 +169,7 @@ def extend_csv_langchain(existing_csv: list, prompt_instructions: str) -> list:
         template=(
             "Given the following CSV mind entries (each line is in the format [START]timestamp,title[END]):\n\n"
             "{existing_csv}\n\n"
-            f"{prompt_instructions}"
+            f"{prompt_text}"
         ),
     )
     formatted_prompt = prompt_template.format(existing_csv=current_csv_str)
@@ -130,6 +189,7 @@ def update_db():
     prompt_instructions = read_prompt()
     if not prompt_instructions:
         return
+    current_date = datetime.now(timezone.utc).strftime("%B %d")
 
     if os.path.exists(DB_FILE):
         try:
@@ -137,10 +197,21 @@ def update_db():
                 existing_data = [line.strip() for line in f if line.strip()]
         except Exception:
             existing_data = []
-        mind, story = extend_csv_langchain(existing_data, prompt_instructions)
+        events = collect_used_events(existing_data)
+        mind, story = extend_csv_langchain(
+            existing_data,
+            prompt_instructions,
+            current_date=current_date,
+            events_to_avoid=events,
+        )
         updated_data = existing_data + [mind]
     else:
-        mind, story = generate_initial_csv_langchain(prompt_instructions)
+        events: list[str] = []
+        mind, story = generate_initial_csv_langchain(
+            prompt_instructions,
+            current_date=current_date,
+            events_to_avoid=events,
+        )
         updated_data = [mind]
 
 
